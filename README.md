@@ -1,6 +1,6 @@
 # Seeing Beneath the Surface: AI-Powered Real-Time Biofouling Detection and 3D Hull Digital Twin Generation
 
-Final Year Project — Department of Computer Science  
+Final Year Project — Department of Computer Science And Artificial Intelligence
 Jordan University of Science and Technology  
 Supervised by Dr. Yaser Jararweh
 
