@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Marines— 3D Fouling Map</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#050c14; font-family:'IBM Plex Mono',monospace; color:#c8dde8; overflow:hidden; }
+
+#canvas { display:block; width:100vw; height:100vh; }
+
+/* HUD overlay */
+#hud {
+  position:fixed; inset:0; pointer-events:none; z-index:10;
+}
+
+/* Top bar */
+#topbar {
+  position:absolute; top:0; left:0; right:0;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 28px;
+  background:rgba(5,12,20,0.88);
+  border-bottom:1px solid rgba(0,200,255,0.12);
+  backdrop-filter:blur(10px);
+}
+.logo { font-family:'Syne',sans-serif; font-size:18px; font-weight:800; color:#fff; letter-spacing:1px; }
+.logo span { color:#00c8ff; }
+.vessel-name { font-size:12px; letter-spacing:2px; color:#00c8ff; text-transform:uppercase; }
+.vessel-sub { font-size:10px; color:#4a6478; margin-top:2px; }
+.hint { font-size:10px; letter-spacing:2px; color:#4a6478; text-transform:uppercase; }
+
+/* Legend */
+#legend {
+  position:absolute; bottom:28px; left:28px;
+  background:rgba(5,12,20,0.88);
+  border:1px solid rgba(0,200,255,0.12);
+  border-radius:10px; padding:18px 22px;
+  pointer-events:all;
+  backdrop-filter:blur(10px);
+  min-width:200px;
+}
+#legend h3 { font-size:9px; letter-spacing:3px; text-transform:uppercase; color:#00c8ff; margin-bottom:14px; }
+.leg { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.leg-swatch { width:32px; height:12px; border-radius:3px; flex-shrink:0; }
+.leg-info { flex:1; }
+.leg-name { font-size:11px; color:#fff; font-weight:600; }
+.leg-range { font-size:10px; color:#4a6478; margin-top:1px; }
+
+/* Zone info panel */
+#zone-panel {
+  position:absolute; bottom:28px; right:28px;
+  background:rgba(5,12,20,0.88);
+  border:1px solid rgba(0,200,255,0.12);
+  border-radius:10px; padding:18px 22px;
+  pointer-events:all;
+  backdrop-filter:blur(10px);
+  min-width:220px;
+  transition: opacity 0.2s;
+}
+#zone-panel h3 { font-size:9px; letter-spacing:3px; text-transform:uppercase; color:#00c8ff; margin-bottom:14px; }
+.zrow { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.zrow .zlbl { font-size:10px; color:#4a6478; }
+.zrow .zval { font-size:12px; color:#fff; font-weight:600; }
+.sev-badge {
+  display:inline-block; padding:4px 12px; border-radius:20px;
+  font-size:11px; font-weight:600; letter-spacing:1px; margin-top:6px;
+}
+.bar-track { height:5px; background:rgba(255,255,255,0.07); border-radius:3px; margin-top:4px; }
+.bar-fill  { height:5px; border-radius:3px; }
+
+/* Controls */
+#controls {
+  position:absolute; top:80px; right:28px;
+  background:rgba(5,12,20,0.88);
+  border:1px solid rgba(0,200,255,0.12);
+  border-radius:10px; padding:16px 20px;
+  pointer-events:all;
+  backdrop-filter:blur(10px);
+}
+#controls h3 { font-size:9px; letter-spacing:3px; text-transform:uppercase; color:#00c8ff; margin-bottom:12px; }
+.ctrl { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.ctrl label { font-size:10px; color:#4a6478; width:90px; }
+.ctrl input[type=range] {
+  -webkit-appearance:none; width:110px; height:3px;
+  background:rgba(0,200,255,0.2); border-radius:2px; outline:none;
+}
+.ctrl input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:13px; height:13px;
+  border-radius:50%; background:#00c8ff; cursor:pointer;
+}
+.ctrl-val { font-size:10px; color:#00c8ff; width:28px; text-align:right; }
+.btn { 
+  display:block; width:100%; padding:7px; margin-top:6px;
+  background:rgba(0,200,255,0.08); border:1px solid rgba(0,200,255,0.2);
+  color:#00c8ff; font-family:'IBM Plex Mono',monospace; font-size:10px;
+  letter-spacing:2px; text-transform:uppercase; border-radius:5px;
+  cursor:pointer; transition:background 0.2s;
+  pointer-events:all;
+}
+.btn:hover { background:rgba(0,200,255,0.18); }
+.btn.active { background:rgba(0,200,255,0.28); color:#fff; }
+
+/* Tooltip */
+#tooltip {
+  position:absolute;
+  background:rgba(5,12,20,0.95);
+  border:1px solid rgba(0,200,255,0.25);
+  border-radius:6px; padding:8px 14px;
+  font-size:11px; pointer-events:none;
+  display:none; white-space:nowrap;
+}
+
+body::before {
+  content:''; position:fixed; inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,200,255,0.012) 3px,rgba(0,200,255,0.012) 4px);
+  pointer-events:none; z-index:9999;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="hud">
+  <div id="topbar">
+    <div class="logo">Marines<span></span> </div>
+    <div>
+      <div class="vessel-name">MV Alwine Oldendorff — 3D Fouling Distribution Map</div>
+      <div class="vessel-sub">Bulk Carrier · ROV-7 Inspection · Port Said · 2025-03-04</div>
+    </div>
+    <div class="hint">Drag to rotate · Scroll to zoom</div>
+  </div>
+
+  <div id="legend">
+    <h3>Fouling Classification</h3>
+    <div class="leg">
+      <div class="leg-swatch" style="background:linear-gradient(90deg,#00e5a0,#00b87a)"></div>
+      <div class="leg-info"><div class="leg-name">Clean</div><div class="leg-range">t&lt;5mm · d&lt;0.30</div></div>
+    </div>
+    <div class="leg">
+      <div class="leg-swatch" style="background:linear-gradient(90deg,#aeea00,#76b800)"></div>
+      <div class="leg-info"><div class="leg-name">Light</div><div class="leg-range">t&lt;20mm · d&lt;0.35</div></div>
+    </div>
+    <div class="leg">
+      <div class="leg-swatch" style="background:linear-gradient(90deg,#ffb300,#e65100)"></div>
+      <div class="leg-info"><div class="leg-name">Moderate</div><div class="leg-range">t&lt;35mm · d&lt;0.65</div></div>
+    </div>
+    <div class="leg">
+      <div class="leg-swatch" style="background:linear-gradient(90deg,#ff4545,#b71c1c)"></div>
+      <div class="leg-info"><div class="leg-name">Heavy</div><div class="leg-range">t≥35mm · d≥0.65</div></div>
+    </div>
+    <div style="border-top:1px solid rgba(0,200,255,0.1);margin-top:12px;padding-top:12px;">
+      <div class="leg"><div class="leg-swatch" style="background:#eceff1"></div>
+        <div class="leg-info"><div class="leg-name" style="color:#90a4ae">Above Waterline</div><div class="leg-range">No fouling</div></div>
+      </div>
+      <div class="leg"><div class="leg-swatch" style="background:#546e7a"></div>
+        <div class="leg-info"><div class="leg-name" style="color:#90a4ae">Boot Top</div><div class="leg-range">Waterline band</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="zone-panel">
+    <h3>Zone Inspector</h3>
+    <div id="zone-content">
+      <div style="font-size:11px;color:#4a6478;text-align:center;padding:10px 0;">
+        Hover over a hull zone<br>to inspect fouling data
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <h3>View Controls</h3>
+    <div class="ctrl">
+      <label>Draft Level</label>
+      <input type="range" id="draft" min="20" max="80" value="50">
+      <span class="ctrl-val" id="draft-val">50%</span>
+    </div>
+    <div class="ctrl">
+      <label>Opacity</label>
+      <input type="range" id="opacity" min="20" max="100" value="100">
+      <span class="ctrl-val" id="opacity-val">100%</span>
+    </div>
+    <div class="ctrl">
+      <label>Auto Rotate</label>
+      <input type="range" id="rotspeed" min="0" max="100" value="20">
+      <span class="ctrl-val" id="rot-val">20%</span>
+    </div>
+    <button class="btn" id="btn-xray">X-Ray Waterline</button>
+    <button class="btn" id="btn-explode">Show Cross-Section</button>
+    <button class="btn" id="btn-reset">Reset Camera</button>
+  </div>
+
+  <div id="tooltip"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ══════════════════════════════════════════════
+// CLASSIFICATION LOGIC (exact spec)
+// ══════════════════════════════════════════════
+function classify(thickness, density) {
+  if (thickness < 5) return density < 0.50 ? "Clean" : "Light";
+  if (thickness < 10) return density < 0.30 ? "Clean" : "Light";
+  if (thickness <= 20) {
+    if (density <= 0.35) return "Light";
+    if (density <= 0.87) return "Moderate";
+    return "Heavy";
+  }
+  if (thickness < 35) {
+    if (density <= 0.30) return "Light";
+    if (density <= 0.65) return "Moderate";
+    return "Heavy";
+  }
+  if (density <= 0.15) return "Light";
+  if (density <= 0.65) return "Moderate";
+  return "Heavy";
+}
+
+const CLASS_COLOR = {
+  Clean:    new THREE.Color(0x00e5a0),
+  Light:    new THREE.Color(0xaeea00),
+  Moderate: new THREE.Color(0xff8f00),
+  Heavy:    new THREE.Color(0xff2222),
+};
+const CLASS_HEX = { Clean:'#00e5a0', Light:'#aeea00', Moderate:'#ff8f00', Heavy:'#ff2222' };
+
+// ══════════════════════════════════════════════
+// HULL ZONE DATA
+// ══════════════════════════════════════════════
+const ZONES = [
+  { id:'flat_bottom',    name:'Flat Bottom',        thickness:38,  density:0.81, region:'keel' },
+  { id:'stbd_bilge',     name:'Stbd Bilge Keel',    thickness:29,  density:0.72, region:'bilge_s' },
+  { id:'port_bilge',     name:'Port Bilge Keel',    thickness:31,  density:0.69, region:'bilge_p' },
+  { id:'bow_bulb',       name:'Bow Bulb',           thickness:42,  density:0.88, region:'bow' },
+  { id:'stern_bottom',   name:'Stern Underwater',   thickness:35,  density:0.76, region:'stern' },
+  { id:'propeller',      name:'Propeller',          thickness:22,  density:0.90, region:'prop' },
+  { id:'rudder',         name:'Rudder',             thickness:19,  density:0.61, region:'rudder' },
+  { id:'port_seachest',  name:'Port Sea Chest',     thickness:48,  density:0.97, region:'sc_p' },
+  { id:'stbd_seachest',  name:'Stbd Sea Chest',     thickness:44,  density:0.94, region:'sc_s' },
+  { id:'boot_top',       name:'Boot Top Band',      thickness:8,   density:0.45, region:'waterline' },
+  { id:'bow_top',        name:'Bow Topsides',       thickness:3,   density:0.12, region:'above' },
+  { id:'mid_top',        name:'Midship Topsides',   thickness:2,   density:0.08, region:'above' },
+];
+ZONES.forEach(z => z.cls = classify(z.thickness, z.density));
+
+// ══════════════════════════════════════════════
+// THREE.JS SCENE
+// ══════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.setClearColor(0x05080f);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x05080f, 0.018);
+
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 300);
+camera.position.set(18, 7, 26);
+camera.lookAt(0, -1, 0);
+
+// ── Lighting ──
+scene.add(new THREE.AmbientLight(0x1a2a40, 1.0));
+const sun = new THREE.DirectionalLight(0xffeedd, 2.0);
+sun.position.set(12, 20, 10);
+sun.castShadow = true;
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0x003366, 0.6);
+fill.position.set(-10, 4, -8);
+scene.add(fill);
+const rim = new THREE.PointLight(0x00c8ff, 0.8, 80);
+rim.position.set(-15, -3, -10);
+scene.add(rim);
+const underLight = new THREE.PointLight(0x0066aa, 0.5, 40);
+underLight.position.set(0, -6, 0);
+scene.add(underLight);
+
+// ══════════════════════════════════════════════
+// VESSEL GROUP
+// ══════════════════════════════════════════════
+const vessel = new THREE.Group();
+scene.add(vessel);
+
+let draftFraction = 0.50; // % of hull depth below waterline
+let xrayMode = false;
+let crossSection = false;
+
+// ── Zone color function ──
+function zoneColorAt(longitudinal, vertical, draft) {
+  // longitudinal: 0=bow, 1=stern
+  // vertical: 0=keel, 1=deck
+  // draft: fraction below waterline (0..1)
+  const submergedFrac = draft; // 0..1 where 1 = deeply submerged
+  const depthBelow = 1.0 - vertical; // 0=deck, 1=keel
+
+  if (vertical > (1.0 - submergedFrac * 0.05)) {
+    // Topsides (above water) - clean grey/white
+    return { color: new THREE.Color(0xeceff1), zone: null };
+  }
+
+  const waterlineDepth = 1.0 - submergedFrac;
+  if (vertical > waterlineDepth - 0.06 && vertical < waterlineDepth + 0.04) {
+    // Boot top zone
+    return { color: new THREE.Color(0x546e7a), zone: ZONES.find(z => z.id === 'boot_top') };
+  }
+
+  if (vertical >= waterlineDepth) {
+    // Above waterline
+    return { color: new THREE.Color(0xdce8ed), zone: null };
+  }
+
+  // SUBMERGED ZONE — apply fouling
+  const relDepth = (waterlineDepth - vertical) / waterlineDepth; // 0=waterline, 1=keel
+  const lon = longitudinal;
+
+  // Determine hull zone based on position
+  let zone = null;
+
+  // Bow bulb
+  if (lon < 0.1 && relDepth > 0.4) {
+    zone = ZONES.find(z => z.id === 'bow_bulb');
+  }
+  // Stern area
+  else if (lon > 0.88 && relDepth > 0.3) {
+    zone = ZONES.find(z => z.id === 'stern_bottom');
+  }
+  // Flat bottom (keel center)
+  else if (relDepth > 0.72) {
+    zone = ZONES.find(z => z.id === 'flat_bottom');
+  }
+  // Bilge area (transition)
+  else if (relDepth > 0.38 && relDepth <= 0.72) {
+    // Will be set per side by caller
+    zone = ZONES.find(z => z.id === 'stbd_bilge');
+  }
+  else {
+    // Upper underwater topsides
+    const t = 8, d = 0.45;
+    return { color: CLASS_COLOR['Light'].clone().multiplyScalar(0.85), zone: ZONES.find(z => z.id === 'boot_top') };
+  }
+
+  if (!zone) zone = ZONES.find(z => z.id === 'flat_bottom');
+
+  // Get base color from classification
+  let c = CLASS_COLOR[zone.cls].clone();
+
+  // Add depth-based darkening variation
+  c.multiplyScalar(0.75 + relDepth * 0.35);
+
+  // Add noise
+  const n = (Math.sin(lon * 47.3 + relDepth * 31.7) * 0.5 + 0.5) * 0.12 - 0.06;
+  c.r = Math.max(0, Math.min(1, c.r + n));
+  c.g = Math.max(0, Math.min(1, c.g + n * 0.5));
+  c.b = Math.max(0, Math.min(1, c.b + n * 0.3));
+
+  return { color: c, zone };
+}
+
+// ══════════════════════════════════════════════
+// BUILD HULL GEOMETRY
+// ══════════════════════════════════════════════
+const L = 22, B = 3.6, D = 3.0;
+let hullMesh, hullGeo;
+const pickableObjects = [];
+
+function buildVessel() {
+  // Clear
+  while (vessel.children.length) {
+    const m = vessel.children[0];
+    vessel.remove(m);
+    if (m.geometry) m.geometry.dispose();
+  }
+  pickableObjects.length = 0;
+
+  const LON_SEG = 120, RING_SEG = 28;
+
+  const verts = [], colors = [], normals = [], uvArr = [];
+
+  function hullProfile(t, u) {
+    // t: 0=bow..1=stern, u: 0=keel..1=deck (port half)
+    let beamFac;
+    if (t < 0.08) beamFac = Math.pow(t / 0.08, 0.55);
+    else if (t > 0.87) beamFac = Math.pow((1 - t) / 0.13, 0.65);
+    else beamFac = 1.0;
+
+    const hw = B * beamFac;
+    const keel = -D * 0.55;
+    const deck =  D * 0.45;
+
+    let y, z;
+    if (u <= 0.5) {
+      const bu = u * 2; // 0..1 bottom half
+      if (bu < 0.32) {
+        // Flat bottom
+        y = keel + bu * 0.25;
+        z = hw * bu * 3.0;
+      } else {
+        // Bilge curve
+        const bq = (bu - 0.32) / 0.68;
+        y = keel + 0.08 + Math.sin(bq * Math.PI * 0.5) * hw * 0.55;
+        z = hw * (0.96 - Math.cos(bq * Math.PI * 0.5) * 0.04);
+      }
+    } else {
+      const su = (u - 0.5) * 2; // 0..1 top half
+      const base = keel + 0.08 + hw * 0.55;
+      y = base + su * (deck - base);
+      z = hw * (1.0 - su * 0.04);
+    }
+
+    // Bow: narrow the bow shape (sharp entry)
+    if (t < 0.12) {
+      const bt = t / 0.12;
+      y = y * (0.5 + bt * 0.5) + keel * (0.5 - bt * 0.5) * (u < 0.5 ? 1 : 0);
+    }
+
+    return { y, z };
+  }
+
+  const waterlineY = D * 0.45 - draftFraction * D;
+
+  for (let si = 0; si < LON_SEG; si++) {
+    const t0 = si / LON_SEG, t1 = (si + 1) / LON_SEG;
+    const x0 = (t0 - 0.5) * L, x1 = (t1 - 0.5) * L;
+
+    for (let ri = 0; ri < RING_SEG; ri++) {
+      const u0 = ri / RING_SEG, u1 = (ri + 1) / RING_SEG;
+
+      // Both sides (port + starboard via sign)
+      for (const side of [1, -1]) {
+        const p00 = hullProfile(t0, u0);
+        const p01 = hullProfile(t0, u1);
+        const p10 = hullProfile(t1, u0);
+        const p11 = hullProfile(t1, u1);
+
+        const pts = [
+          [x0, p00.y, side * p00.z, u0, t0],
+          [x0, p01.y, side * p01.z, u1, t0],
+          [x1, p10.y, side * p10.z, u0, t1],
+          [x1, p10.y, side * p10.z, u0, t1],
+          [x0, p01.y, side * p01.z, u1, t0],
+          [x1, p11.y, side * p11.z, u1, t1],
+        ];
+
+        for (const [x, y, z, u, t] of pts) {
+          verts.push(x, y, z);
+          uvArr.push(t, u);
+          normals.push(0, 1, 0);
+
+          // Vertical position relative to deck & keel
+          const deckY = D * 0.45;
+          const keelY = -D * 0.55;
+          const vertFrac = (y - keelY) / (deckY - keelY); // 0=keel,1=deck
+
+          // Determine submerged status
+          const aboveWater = y > waterlineY;
+          const bootTop = !aboveWater && y > waterlineY - 0.25;
+
+          let c;
+          if (aboveWater) {
+            c = new THREE.Color(0xe0eaee);
+          } else if (bootTop) {
+            c = new THREE.Color(0x607d8b);
+          } else {
+            // SUBMERGED - compute fouling color
+            const relDepth = Math.min(1, (waterlineY - y) / (D * draftFraction + 0.1));
+            const lon = t;
+
+            let zoneId = 'flat_bottom';
+            if (lon < 0.09 && relDepth > 0.35) zoneId = 'bow_bulb';
+            else if (lon > 0.88 && relDepth > 0.25) zoneId = 'stern_bottom';
+            else if (relDepth > 0.68) zoneId = 'flat_bottom';
+            else if (relDepth > 0.35) zoneId = side > 0 ? 'stbd_bilge' : 'port_bilge';
+            else zoneId = 'boot_top';
+
+            // Sea chest hotspots
+            if (Math.abs(lon - 0.42) < 0.04 && relDepth > 0.30 && relDepth < 0.55) zoneId = 'port_seachest';
+            if (Math.abs(lon - 0.52) < 0.04 && relDepth > 0.30 && relDepth < 0.55) zoneId = 'stbd_seachest';
+
+            const zone = ZONES.find(z => z.id === zoneId);
+            c = CLASS_COLOR[zone ? zone.cls : 'Heavy'].clone();
+
+            // Depth gradient darkening
+            c.multiplyScalar(0.65 + relDepth * 0.45);
+
+            // Organic noise texture
+            const nx = Math.sin(x * 8.3 + relDepth * 12.1) * Math.cos(z * 6.7);
+            const noise = nx * 0.08;
+            c.r = Math.max(0, Math.min(1, c.r + noise));
+            c.g = Math.max(0, Math.min(1, c.g + noise * 0.4));
+            c.b = Math.max(0, Math.min(1, c.b + noise * 0.2));
+          }
+
+          colors.push(c.r, c.g, c.b);
+        }
+      }
+    }
+  }
+
+  hullGeo = new THREE.BufferGeometry();
+  hullGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  hullGeo.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+  hullGeo.setAttribute('normal',   new THREE.Float32BufferAttribute(normals, 3));
+  hullGeo.setAttribute('uv',       new THREE.Float32BufferAttribute(uvArr, 2));
+  hullGeo.computeVertexNormals();
+
+  const hullMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.6,
+    metalness: 0.15,
+    side: THREE.DoubleSide,
+    transparent: xrayMode,
+    opacity: xrayMode ? 0.45 : 1.0,
+  });
+
+  hullMesh = new THREE.Mesh(hullGeo, hullMat);
+  hullMesh.castShadow = true;
+  hullMesh.userData.type = 'hull';
+  vessel.add(hullMesh);
+  pickableObjects.push(hullMesh);
+
+  // ── DECK ──
+  const deckGeo = new THREE.BoxGeometry(L * 0.85, 0.2, B * 1.75);
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x455a64, roughness: 0.9 });
+  const deck = new THREE.Mesh(deckGeo, deckMat);
+  deck.position.y = D * 0.45;
+  vessel.add(deck);
+
+  // ── CARGO HATCHES ──
+  const hatchMat = new THREE.MeshStandardMaterial({ color: 0x546e7a, roughness: 0.85 });
+  [-7.5, -4.2, -0.8, 2.6, 5.8].forEach(hx => {
+    const h = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.14, B * 1.35), hatchMat);
+    h.position.set(hx, D * 0.45 + 0.17, 0);
+    vessel.add(h);
+  });
+
+  // ── CRANES ──
+  const craneMat = new THREE.MeshStandardMaterial({ color: 0xc8a85a, roughness: 0.6 });
+  [-5.5, -2, 1.2, 4.2].forEach(cx => {
+    // Base
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.55, 10), craneMat);
+    base.position.set(cx, D * 0.45 + 0.55, 0.2);
+    vessel.add(base);
+    // Mast
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.18, 4.0, 10), craneMat);
+    mast.position.set(cx, D * 0.45 + 2.7, 0.2);
+    vessel.add(mast);
+    // Boom
+    const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 2.6, 8), craneMat);
+    boom.rotation.z = -0.65;
+    boom.position.set(cx + 0.85, D * 0.45 + 4.0, 0.2);
+    vessel.add(boom);
+  });
+
+  // ── SUPERSTRUCTURE ──
+  const superMat = new THREE.MeshStandardMaterial({ color: 0xeceff1, roughness: 0.55 });
+  const sup = new THREE.Mesh(new THREE.BoxGeometry(3.2, 4.5, B * 1.6), superMat);
+  sup.position.set(8.5, D * 0.45 + 2.6, 0);
+  vessel.add(sup);
+  // Bridge wing
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.45, B * 2.4), superMat);
+  wing.position.set(8.5, D * 0.45 + 4.95, 0);
+  vessel.add(wing);
+  // Funnel
+  const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.65, 2.0, 12), 
+    new THREE.MeshStandardMaterial({ color: 0x1c2f3a, roughness: 0.7 }));
+  funnel.position.set(8.6, D * 0.45 + 6.8, 0);
+  vessel.add(funnel);
+
+  // ── PROPELLER ──
+  buildPropeller(waterlineY);
+
+  // ── RUDDER ──
+  buildRudder(waterlineY);
+
+  // ── SEA CHEST INDICATORS ──
+  buildSeaChests(waterlineY);
+
+  // ── WATERLINE REFERENCE ──
+  const wlGeo = new THREE.BoxGeometry(L * 0.9, 0.04, B * 2.1);
+  const wlMat = new THREE.MeshStandardMaterial({ color: 0x00c8ff, transparent: true, opacity: 0.35, roughness: 0.2 });
+  const wlMesh = new THREE.Mesh(wlGeo, wlMat);
+  wlMesh.position.y = waterlineY;
+  vessel.add(wlMesh);
+
+  // Waterline label plane
+  addWaterlineMarker(waterlineY);
+}
+
+function buildPropeller(waterlineY) {
+  const zone = ZONES.find(z => z.id === 'propeller');
+  const c = CLASS_COLOR[zone.cls];
+  const propMat = new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0.4 });
+
+  const propG = new THREE.Group();
+  propG.position.set(-L * 0.5 + 0.25, -D * 0.28, 0);
+  propG.userData = { zone };
+
+  // Hub
+  const hub = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 10), propMat);
+  propG.add(hub);
+
+  // 4 Blades
+  for (let b = 0; b < 4; b++) {
+    const blade = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.55, 1.4, 8),
+      propMat
+    );
+    blade.rotation.x = (b / 4) * Math.PI * 2;
+    blade.position.y = 0.5;
+    propG.add(blade);
+  }
+
+  propG.userData.type = 'zone';
+  vessel.add(propG);
+  pickableObjects.push(...propG.children.map(c => { c.userData = propG.userData; return c; }));
+  vessel.userData.propG = propG;
+}
+
+function buildRudder(waterlineY) {
+  const zone = ZONES.find(z => z.id === 'rudder');
+  const c = CLASS_COLOR[zone.cls];
+  const rudMat = new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 });
+  const rud = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.6, 1.0), rudMat);
+  rud.position.set(-L * 0.5 + 0.1, -D * 0.16, 0);
+  rud.userData = { zone, type: 'zone' };
+  vessel.add(rud);
+  pickableObjects.push(rud);
+}
+
+function buildSeaChests(waterlineY) {
+  const scData = [
+    { id:'port_seachest', x: 0.5, side: 1 },
+    { id:'stbd_seachest', x: 0.5, side: -1 },
+  ];
+  scData.forEach(sc => {
+    const zone = ZONES.find(z => z.id === sc.id);
+    const c = CLASS_COLOR[zone.cls];
+    const mat = new THREE.MeshStandardMaterial({ color: c, roughness: 0.85 });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.65, 0.22), mat);
+    mesh.position.set(sc.x, -D * 0.25, sc.side * B * 0.97);
+    mesh.userData = { zone, type: 'zone' };
+    vessel.add(mesh);
+    pickableObjects.push(mesh);
+
+    // Grate lines
+    const gMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    for (let g = -2; g <= 2; g++) {
+      const gl = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.04, 0.25), gMat);
+      gl.position.set(sc.x, -D * 0.25 + g * 0.1, sc.side * B * 0.98 + sc.side * 0.02);
+      vessel.add(gl);
+    }
+  });
+}
+
+function addWaterlineMarker(y) {
+  // Small tick marks along waterline
+  for (let i = -10; i <= 10; i++) {
+    const tick = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.35, 0.05),
+      new THREE.MeshStandardMaterial({ color: 0x00c8ff, emissive: 0x00c8ff, emissiveIntensity: 0.5 })
+    );
+    tick.position.set(i * L / 22, y, B * 1.1);
+    vessel.add(tick);
+  }
+}
+
+// ══════════════════════════════════════════════
+// OCEAN WATER
+// ══════════════════════════════════════════════
+const waterGeo = new THREE.PlaneGeometry(120, 120, 50, 50);
+const waterMat = new THREE.MeshStandardMaterial({
+  color: 0x0b3060, transparent: true, opacity: 0.7,
+  roughness: 0.05, metalness: 0.1, side: THREE.DoubleSide,
+});
+const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+waterMesh.rotation.x = -Math.PI / 2;
+waterMesh.position.y = 0.05;
+scene.add(waterMesh);
+
+const wPos = waterGeo.attributes.position;
+const wPhase = Array.from({ length: wPos.count }, () => Math.random() * Math.PI * 2);
+
+// ══════════════════════════════════════════════
+// GRID / DEPTH REFERENCE
+// ══════════════════════════════════════════════
+const grid = new THREE.GridHelper(80, 40, 0x0d2a44, 0x071520);
+grid.position.y = -D * 0.55 - 3;
+scene.add(grid);
+
+// ══════════════════════════════════════════════
+// ORBIT CONTROLS (manual)
+// ══════════════════════════════════════════════
+let theta = 0.28, phi = 0.42, radius = 34;
+const target = new THREE.Vector3(0, -1, 0);
+let dragging = false, prevX = 0, prevY = 0;
+
+function updateCamera() {
+  camera.position.set(
+    target.x + radius * Math.sin(phi) * Math.sin(theta),
+    target.y + radius * Math.cos(phi),
+    target.z + radius * Math.sin(phi) * Math.cos(theta)
+  );
+  camera.lookAt(target);
+}
+updateCamera();
+
+canvas.addEventListener('mousedown', e => { dragging = true; prevX = e.clientX; prevY = e.clientY; });
+window.addEventListener('mouseup', () => dragging = false);
+canvas.addEventListener('mousemove', e => {
+  if (dragging) {
+    theta -= (e.clientX - prevX) * 0.007;
+    phi = Math.max(0.08, Math.min(1.55, phi + (e.clientY - prevY) * 0.007));
+    prevX = e.clientX; prevY = e.clientY;
+    updateCamera();
+  }
+  handleHover(e);
+});
+canvas.addEventListener('wheel', e => {
+  radius = Math.max(8, Math.min(70, radius + e.deltaY * 0.04));
+  updateCamera();
+}, { passive: true });
+
+// Touch support
+let tPrev = null;
+canvas.addEventListener('touchstart', e => { tPrev = e.touches[0]; });
+canvas.addEventListener('touchmove', e => {
+  if (!tPrev) return;
+  const t = e.touches[0];
+  theta -= (t.clientX - tPrev.clientX) * 0.007;
+  phi = Math.max(0.08, Math.min(1.55, phi + (t.clientY - tPrev.clientY) * 0.007));
+  tPrev = t; updateCamera();
+  e.preventDefault();
+}, { passive: false });
+
+// ══════════════════════════════════════════════
+// RAYCASTER / HOVER
+// ══════════════════════════════════════════════
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const tooltip = document.getElementById('tooltip');
+const zonePanel = document.getElementById('zone-panel');
+
+function handleHover(e) {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  const hits = raycaster.intersectObjects(pickableObjects, false);
+  if (hits.length > 0) {
+    const obj = hits[0].object;
+    const pt = hits[0].point;
+
+    // Determine zone from hit position
+    let zone = obj.userData.zone;
+
+    if (!zone && obj === hullMesh) {
+      // Determine zone from hit point on hull
+      const lon = (pt.x / L) + 0.5;
+      const wlY = D * 0.45 - draftFraction * D;
+      const relDepth = Math.min(1, Math.max(0, (wlY - pt.y) / (D * draftFraction + 0.01)));
+
+      if (pt.y > wlY) zone = null;
+      else if (lon < 0.09 && relDepth > 0.35) zone = ZONES.find(z => z.id === 'bow_bulb');
+      else if (lon > 0.88 && relDepth > 0.25) zone = ZONES.find(z => z.id === 'stern_bottom');
+      else if (relDepth > 0.68) zone = ZONES.find(z => z.id === 'flat_bottom');
+      else if (relDepth > 0.35) zone = ZONES.find(z => z.id === pt.z > 0 ? 'stbd_bilge' : 'port_bilge');
+      else zone = ZONES.find(z => z.id === 'boot_top');
+
+      if (Math.abs(lon - 0.42) < 0.04 && relDepth > 0.3 && relDepth < 0.55) zone = ZONES.find(z => z.id === 'port_seachest');
+      if (Math.abs(lon - 0.52) < 0.04 && relDepth > 0.3 && relDepth < 0.55) zone = ZONES.find(z => z.id === 'stbd_seachest');
+    }
+
+    if (zone) {
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX + 14) + 'px';
+      tooltip.style.top = (e.clientY - 10) + 'px';
+      tooltip.textContent = zone.name;
+      showZonePanel(zone);
+      canvas.style.cursor = 'crosshair';
+    } else {
+      tooltip.style.display = 'none';
+      canvas.style.cursor = 'grab';
+    }
+  } else {
+    tooltip.style.display = 'none';
+    canvas.style.cursor = 'grab';
+  }
+}
+
+function showZonePanel(zone) {
+  const hex = CLASS_HEX[zone.cls];
+  const densityPct = Math.round(zone.density * 100);
+  zonePanel.querySelector('#zone-content').innerHTML = `
+    <div class="zrow"><span class="zlbl">Zone</span><span class="zval">${zone.name}</span></div>
+    <div class="zrow"><span class="zlbl">Thickness</span><span class="zval">${zone.thickness} mm</span></div>
+    <div class="zrow"><span class="zlbl">Density</span><span class="zval">${densityPct}%</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${densityPct}%;background:${hex};"></div></div>
+    <div class="zrow" style="margin-top:10px;">
+      <span class="zlbl">Classification</span>
+      <span class="sev-badge" style="background:${hex}22;color:${hex};border:1px solid ${hex}55;">${zone.cls}</span>
+    </div>
+    <div class="zrow">
+      <span class="zlbl">Speed Loss</span>
+      <span class="zval" style="color:${hex};">${zone.cls === 'Heavy' ? '−12%' : zone.cls === 'Moderate' ? '−6%' : zone.cls === 'Light' ? '−2%' : '0%'}</span>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════
+// UI CONTROLS
+// ══════════════════════════════════════════════
+document.getElementById('draft').addEventListener('input', function() {
+  draftFraction = this.value / 100;
+  document.getElementById('draft-val').textContent = this.value + '%';
+  buildVessel();
+});
+
+document.getElementById('opacity').addEventListener('input', function() {
+  document.getElementById('opacity-val').textContent = this.value + '%';
+  if (hullMesh) {
+    hullMesh.material.transparent = this.value < 100;
+    hullMesh.material.opacity = this.value / 100;
+  }
+});
+
+document.getElementById('rotspeed').addEventListener('input', function() {
+  document.getElementById('rot-val').textContent = this.value + '%';
+});
+
+document.getElementById('btn-xray').addEventListener('click', function() {
+  xrayMode = !xrayMode;
+  this.classList.toggle('active', xrayMode);
+  if (hullMesh) {
+    hullMesh.material.transparent = xrayMode;
+    hullMesh.material.opacity = xrayMode ? 0.35 : 1.0;
+  }
+});
+
+document.getElementById('btn-explode').addEventListener('click', function() {
+  crossSection = !crossSection;
+  this.classList.toggle('active', crossSection);
+  // Clip to show cross section by rotating view under hull
+  if (crossSection) {
+    phi = 1.45; theta = 0.0; radius = 22;
+  } else {
+    phi = 0.42; theta = 0.28; radius = 34;
+  }
+  updateCamera();
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  theta = 0.28; phi = 0.42; radius = 34;
+  target.set(0, -1, 0);
+  updateCamera();
+});
+
+// ══════════════════════════════════════════════
+// ANIMATION LOOP
+// ══════════════════════════════════════════════
+let time = 0;
+buildVessel();
+
+function animate() {
+  requestAnimationFrame(animate);
+  time += 0.016;
+
+  // Auto rotate
+  const rotSpeed = document.getElementById('rotspeed').value / 100 * 0.004;
+  if (rotSpeed > 0) {
+    theta += rotSpeed;
+    updateCamera();
+  }
+
+  // Spin propeller
+  if (vessel.userData.propG) vessel.userData.propG.rotation.x += 0.07;
+
+  // Animate water
+  for (let i = 0; i < wPos.count; i++) {
+    wPos.setZ(i,
+      Math.sin(time * 0.7 + wPos.getX(i) * 0.25 + wPhase[i]) * 0.14 +
+      Math.cos(time * 0.45 + wPos.getY(i) * 0.3 + wPhase[i]) * 0.07
+    );
+  }
+  wPos.needsUpdate = true;
+
+  // Bob the vessel
+  vessel.position.y = Math.sin(time * 0.38) * 0.05;
+
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
