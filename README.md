@@ -45,8 +45,8 @@ Inspection Report
 ```
 📁 repo/
 ├── 📁 models/
-│   ├── GP2_CLS26.ipynb          ← Classification model (YOLO26-S)
-│   └── GP2_SEG26.ipynb          ← Segmentation model (YOLO11-S)
+│   ├── GP2_CLS26.ipynb          ← Classification model 
+│   └── GP2_SEG26.ipynb          ← Segmentation model 
 ├── 📁 digital-twin/
 │   ├── vessel-3d-fouling.html   ← 3D visualization (open this)
 │   └── README.md                ← Digital twin documentation
@@ -58,11 +58,11 @@ Inspection Report
 
 ## Models
 
-Two deep learning tasks were developed and evaluated:
+Two deep learning tasks were developed and evaluated using multiple YOLO architecture generations:
 
-**Classification** — assigns each hull image a fouling severity level (Clean, Light, Moderate, or Heavy) using YOLO-based architectures trained on a custom underwater dataset.
+**Classification** — assigns each hull image a fouling severity level: Clean, Light, Moderate, or Heavy.
 
-**Segmentation** — performs pixel-level delineation of biofouling regions on the hull surface. A black background preprocessing step was applied to isolate fouling areas and significantly improve model focus and accuracy.
+**Segmentation** — performs pixel-level delineation of biofouling regions on the hull surface.
 
 ---
 
