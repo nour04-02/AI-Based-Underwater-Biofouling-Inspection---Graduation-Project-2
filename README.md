@@ -68,8 +68,8 @@ Two deep learning tasks were developed and evaluated using multiple YOLO archite
 
 ## Dataset
 
-- Over 10,000 underwater images collected in collaboration with ship maintenance companies in Aqaba, Jordan
-- Final dataset after filtering: 2,531 images for classification, 1,000 for segmentation
+
+- The Dataset Contains: 2,531 images for classification, 1,000 for segmentation
 - Four severity classes: Clean, Light, Moderate, Heavy
 - Annotated manually using Make Sense AI platform
 - Classification split: 70% train / 20% val / 10% test
